@@ -1,0 +1,107 @@
+{
+  "name": "Supply Chain Dashboard",
+  "nodes": [
+    {
+      "id": "a4166995-9dd5-4a98-b544-a5bd9187f34b",
+      "name": "Every 15 minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 15
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "e59037d8-179e-4fef-b78d-db0314e9bcd1",
+      "name": "Manual test",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        210
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "c45de88e-7876-4254-b5f8-5080c6d4e71e",
+      "name": "Generate supply chain records",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        265,
+        105
+      ],
+      "parameters": {
+        "jsCode": "const dayMs = 86400000;\nconst now = new Date();\nconst today = Math.floor(now.getTime() / dayMs);\nconst day = (index) => new Date(index * dayMs).toISOString().slice(0, 10);\nconst suppliers = ['Aster Components', 'Fieldstone Packaging', 'Northline Parts', 'Cedar Materials'];\nconst warehouses = ['Mumbai', 'Pune', 'Bengaluru'];\nconst skus = ['BX-110', 'BX-120', 'FT-205', 'FT-210', 'PK-320', 'PK-330', 'MT-440', 'MT-450'];\n\nconst orders = [];\nfor (let due = today - 44; due <= today + 6; due += 1) {\n  for (let line = 1; line <= 6; line += 1) {\n    const key = due * 997 + line * 317;\n    const outcome = (key * 97) % 101;\n    const completion = outcome < 76 ? due - key % 3 : due + 1 + key % 9;\n    const cancelled = outcome >= 98;\n    const closed = !cancelled && completion <= today;\n    const ordered = 35 + key % 116;\n    orders.push({\n      order_id: `PO-${day(due)}`,\n      line_number: line,\n      supplier: suppliers[(due + line) % suppliers.length],\n      warehouse: warehouses[(due + line) % warehouses.length],\n      sku: skus[(key + line) % skus.length],\n      ordered_qty: ordered,\n      received_qty: closed ? ordered : cancelled ? 0 : Math.floor(ordered * (key % 3) / 4),\n      promised_date: day(due),\n      completed_date: closed ? day(completion) : null,\n      cancelled,\n    });\n  }\n}\n\nconst quarterHour = Math.floor(now.getTime() / 900000);\nconst inventory = warehouses.flatMap((warehouse, wh) => skus.map((sku, index) => ({\n  warehouse,\n  sku,\n  on_hand_qty: (wh * 43 + index * 19 + quarterHour * 7) % 130,\n  reorder_point: 24 + index % 4 * 5,\n})));\n\nreturn [{ json: {\n  source_label: 'Generated records',\n  source_as_of: now.toISOString(),\n  orders,\n  inventory,\n} }];\n"
+      }
+    },
+    {
+      "id": "57f7538e-90be-4742-bf6a-ec75dc53d7a1",
+      "name": "Load batch into PostgreSQL",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        540,
+        105
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT * FROM supply.ingest_batch($1::jsonb);",
+        "options": {
+          "queryReplacement": "={{ [JSON.stringify($json)] }}"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every 15 minutes": {
+      "main": [
+        [
+          {
+            "node": "Generate supply chain records",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual test": {
+      "main": [
+        [
+          {
+            "node": "Generate supply chain records",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate supply chain records": {
+      "main": [
+        [
+          {
+            "node": "Load batch into PostgreSQL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Kolkata",
+    "saveDataSuccessExecution": "none"
+  },
+  "active": false
+}
